@@ -1,0 +1,536 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local Config = {
+    AimbotEnabled = false,
+    FOV = 200,
+    AimPart = "Head",
+    AimSmoothness = 4,
+    WallCheck = true,
+    ESPEnabled = false,
+    TeamCheck = false,
+    ShowName = true,
+    ShowHealth = true,
+    ShowTracers = true,
+    ShowBox = true,
+    ShowDistance = true,
+    BoostFPS = false,
+    ShowFPS = true,
+    EnableCircle = true,
+    CircleSize = 200,
+    CircleThickness = 2,
+    CircleTransparency = 0.3,
+}
+
+local espObjects = {}
+local fovCircle = nil
+
+local function IsVisible(character, targetPart)
+    if not Config.WallCheck then return true end
+    local origin = Camera.CFrame.Position
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, character}
+    local ray = workspace:Raycast(origin, (targetPart.Position - origin), raycastParams)
+    return not ray or (ray.Instance and (ray.Instance == targetPart or ray.Instance:IsDescendantOf(character)))
+end
+
+local function CreateESP(player)
+    if espObjects[player] then return end
+    local esp = {
+        Box = Drawing.new("Square"),
+        HealthBar = Drawing.new("Line"),
+        HealthBg = Drawing.new("Line"),
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text"),
+        Tracer = Drawing.new("Line"),
+    }
+    esp.Box.Thickness = 2
+    esp.Box.Color = Color3.fromRGB(0, 180, 255)
+    esp.Box.Filled = false
+    esp.Box.Transparency = 0.4
+    esp.HealthBar.Color = Color3.fromRGB(255, 0, 0)
+    esp.HealthBar.Thickness = 3
+    esp.HealthBg.Color = Color3.fromRGB(0, 0, 0)
+    esp.HealthBg.Thickness = 3
+    esp.HealthBg.Transparency = 0.5
+    esp.Name.Color = Color3.fromRGB(255, 255, 255)
+    esp.Name.Center = true
+    esp.Name.Outline = true
+    esp.Name.Size = 14
+    esp.Distance.Color = Color3.fromRGB(255, 255, 255)
+    esp.Distance.Center = true
+    esp.Distance.Outline = true
+    esp.Distance.Size = 12
+    esp.Tracer.Color = Color3.fromRGB(0, 180, 255)
+    esp.Tracer.Thickness = 1.5
+    esp.Tracer.Transparency = 0.5
+    espObjects[player] = esp
+end
+
+local function UpdateESP(player)
+    local esp = espObjects[player]
+    if not esp or not player.Character or not player.Character:FindFirstChild("Humanoid") then return end
+    local humanoid = player.Character.Humanoid
+    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    if Config.TeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
+        for _, obj in pairs(esp) do
+            if obj.Visible ~= nil then obj.Visible = false end
+        end
+        return
+    end
+
+    local screenPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+    if not onScreen then
+        for _, obj in pairs(esp) do
+            if obj.Visible ~= nil then obj.Visible = false end
+        end
+        return
+    end
+
+    local scale = 4.5
+    local boxSize = Vector2.new(scale * 5, scale * 6.5)
+    local boxPos = Vector2.new(screenPos.X - boxSize.X/2, screenPos.Y - boxSize.Y/2)
+
+    if Config.ShowBox then
+        esp.Box.Visible = true
+        esp.Box.Position = boxPos
+        esp.Box.Size = boxSize
+    else
+        esp.Box.Visible = false
+    end
+
+    if Config.ShowHealth then
+        local healthPercent = math.max(0, humanoid.Health / humanoid.MaxHealth)
+        local barHeight = boxSize.Y * healthPercent
+        local barPos = Vector2.new(boxPos.X - 5, boxPos.Y + boxSize.Y - barHeight)
+        esp.HealthBar.Visible = true
+        esp.HealthBg.Visible = true
+        esp.HealthBar.From = barPos
+        esp.HealthBar.To = Vector2.new(barPos.X, barPos.Y + barHeight)
+        esp.HealthBg.From = Vector2.new(boxPos.X - 5, boxPos.Y)
+        esp.HealthBg.To = Vector2.new(boxPos.X - 5, boxPos.Y + boxSize.Y)
+        local r = 255 * (1 - healthPercent)
+        local g = 255 * healthPercent
+        esp.HealthBar.Color = Color3.fromRGB(r, g, 0)
+    else
+        esp.HealthBar.Visible = false
+        esp.HealthBg.Visible = false
+    end
+
+    if Config.ShowName then
+        esp.Name.Visible = true
+        esp.Name.Position = Vector2.new(screenPos.X, boxPos.Y - 20)
+        esp.Name.Text = player.Name
+    else
+        esp.Name.Visible = false
+    end
+
+    if Config.ShowDistance then
+        local distance = math.floor((Camera.CFrame.Position - rootPart.Position).Magnitude)
+        esp.Distance.Visible = true
+        esp.Distance.Position = Vector2.new(screenPos.X, boxPos.Y + boxSize.Y + 15)
+        esp.Distance.Text = distance .. "m"
+    else
+        esp.Distance.Visible = false
+    end
+
+    if Config.ShowTracers then
+        local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        esp.Tracer.Visible = true
+        esp.Tracer.From = center
+        esp.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+    else
+        esp.Tracer.Visible = false
+    end
+end
+
+local function CreateFOVCircle()
+    if fovCircle then fovCircle:Remove() end
+    if not Config.EnableCircle then return end
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Radius = Config.CircleSize
+    fovCircle.Thickness = Config.CircleThickness
+    fovCircle.Color = Color3.fromRGB(0, 180, 255)
+    fovCircle.Filled = false
+    fovCircle.Transparency = Config.CircleTransparency
+    fovCircle.Visible = Config.AimbotEnabled
+    fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end
+
+local function GetClosestTarget()
+    local bestTarget = nil
+    local bestDistance = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local fovRadius = Config.FOV
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not player.Character then continue end
+        local humanoid = player.Character:FindFirstChild("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then continue end
+        if Config.TeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
+            continue
+        end
+
+        local targetPart = player.Character:FindFirstChild(Config.AimPart)
+        if not targetPart then
+            targetPart = player.Character:FindFirstChild("Head")
+        end
+        if not targetPart then continue end
+
+        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+        if not onScreen then continue end
+
+        local distance = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+        if distance > fovRadius then continue end
+
+        if Config.WallCheck and not IsVisible(player.Character, targetPart) then
+            continue
+        end
+
+        if distance < bestDistance then
+            bestTarget = targetPart
+            bestDistance = distance
+        end
+    end
+    return bestTarget
+end
+
+local function AimAt(targetPart)
+    if not targetPart then return end
+    local targetPos = targetPart.Position
+    local currentPos = Camera.CFrame.Position
+    local direction = (targetPos - currentPos).Unit
+    local newCFrame = CFrame.new(currentPos, currentPos + direction)
+
+    if Config.AimSmoothness > 0 then
+        local smoothFactor = math.max(0, math.min(1, Config.AimSmoothness / 10))
+        local currentAngle = Camera.CFrame.LookVector
+        local targetAngle = newCFrame.LookVector
+        local smoothAngle = currentAngle:Lerp(targetAngle, smoothFactor)
+        newCFrame = CFrame.new(currentPos, currentPos + smoothAngle)
+    end
+
+    Camera.CFrame = newCFrame
+end
+
+local function CreateModernUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "ModernPanel"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = game:GetService("CoreGui")
+
+    local blur = Instance.new("BlurEffect")
+    blur.Name = "PanelBlur"
+    blur.Size = 0
+    blur.Parent = game:GetService("Lighting")
+
+    local floatingButton = Instance.new("ImageButton")
+    floatingButton.Name = "FloatingButton"
+    floatingButton.Size = UDim2.new(0, 60, 0, 60)
+    floatingButton.Position = UDim2.new(0, 20, 0, 120)
+    floatingButton.BackgroundColor3 = Color3.fromRGB(30, 30, 46)
+    floatingButton.BackgroundTransparency = 0.1
+    floatingButton.BorderSizePixel = 0
+    floatingButton.Image = "rbxassetid://3926305904"
+    floatingButton.ImageColor3 = Color3.fromRGB(0, 180, 255)
+    floatingButton.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = floatingButton
+
+    local mainPanel = Instance.new("Frame")
+    mainPanel.Name = "MainPanel"
+    mainPanel.Size = UDim2.new(0, 400, 0, 550)
+    mainPanel.Position = UDim2.new(0.5, -200, 0.5, -275)
+    mainPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+    mainPanel.BackgroundTransparency = 1
+    mainPanel.Visible = false
+    mainPanel.Parent = screenGui
+
+    local background = Instance.new("Frame")
+    background.Name = "Background"
+    background.Size = UDim2.new(1, 0, 1, 0)
+    background.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    background.BackgroundTransparency = 0.9
+    background.Parent = mainPanel
+
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0, 12)
+    bgCorner.Parent = background
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 50)
+    title.Position = UDim2.new(0, 0, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "⚡ PAINEL ADMIN ⚡"
+    title.TextColor3 = Color3.fromRGB(0, 180, 255)
+    title.TextScaled = true
+    title.Font = Enum.Font.GothamBold
+    title.Parent = background
+
+    local separator = Instance.new("Frame")
+    separator.Name = "Separator"
+    separator.Size = UDim2.new(0.9, 0, 0, 2)
+    separator.Position = UDim2.new(0.05, 0, 0, 58)
+    separator.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+    separator.BackgroundTransparency = 0.5
+    separator.Parent = background
+
+    local tabContainer = Instance.new("Frame")
+    tabContainer.Name = "TabContainer"
+    tabContainer.Size = UDim2.new(1, 0, 0, 45)
+    tabContainer.Position = UDim2.new(0, 0, 0, 63)
+    tabContainer.BackgroundTransparency = 1
+    tabContainer.Parent = background
+
+    local tabs = {
+        {Name = "Aimbot", Icon = "🎯"},
+        {Name = "ESP", Icon = "👁"},
+        {Name = "Performance", Icon = "⚡"}
+    }
+
+    local tabButtons = {}
+    local tabContents = {}
+    local currentTab = "Aimbot"
+
+    for i, tab in ipairs(tabs) do
+        local btn = Instance.new("TextButton")
+        btn.Name = tab.Name.."Tab"
+        btn.Size = UDim2.new(0.33, 0, 1, 0)
+        btn.Position = UDim2.new((i-1) * 0.33, 0, 0, 0)
+        btn.BackgroundTransparency = 1
+        btn.Text = tab.Icon.." "..tab.Name
+        btn.TextColor3 = Color3.fromRGB(180, 180, 200)
+        btn.TextScaled = true
+        btn.Font = Enum.Font.GothamSemibold
+        btn.Parent = tabContainer
+
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 8)
+        btnCorner.Parent = btn
+
+        tabButtons[tab.Name] = btn
+
+        btn.MouseButton1Click:Connect(function()
+            for name, button in pairs(tabButtons) do
+                button.TextColor3 = Color3.fromRGB(180, 180, 200)
+            end
+            btn.TextColor3 = Color3.fromRGB(0, 180, 255)
+            currentTab = tab.Name
+            for name, content in pairs(tabContents) do
+                content.Visible = (name == tab.Name)
+            end
+        end)
+    end
+
+    local contentContainer = Instance.new("Frame")
+    contentContainer.Name = "ContentContainer"
+    contentContainer.Size = UDim2.new(1, -20, 1, -130)
+    contentContainer.Position = UDim2.new(0, 10, 0, 112)
+    contentContainer.BackgroundTransparency = 1
+    contentContainer.Parent = background
+
+    local function CreateToggle(parent, text, yPos, configKey)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 0, 40)
+        frame.Position = UDim2.new(0, 0, 0, yPos)
+        frame.BackgroundTransparency = 1
+        frame.Parent = parent
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0.7, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = Color3.fromRGB(200, 200, 220)
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextScaled = true
+        label.Font = Enum.Font.Gotham
+        label.Parent = frame
+
+        local toggle = Instance.new("ImageButton")
+        toggle.Size = UDim2.new(0, 55, 0, 28)
+        toggle.Position = UDim2.new(0.85, 0, 0.5, -14)
+        toggle.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0, 100, 200) or Color3.fromRGB(60, 60, 80)
+        toggle.BackgroundTransparency = 0.3
+        toggle.Parent = frame
+
+        local toggleCorner = Instance.new("UICorner")
+        toggleCorner.CornerRadius = UDim.new(1, 0)
+        toggleCorner.Parent = toggle
+
+        local indicator = Instance.new("Frame")
+        indicator.Size = UDim2.new(0, 22, 0, 22)
+        indicator.Position = Config[configKey] and UDim2.new(0, 30, 0.5, -11) or UDim2.new(0, 3, 0.5, -11)
+        indicator.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0, 180, 255) or Color3.fromRGB(150, 150, 170)
+        indicator.Parent = toggle
+
+        local indicatorCorner = Instance.new("UICorner")
+        indicatorCorner.CornerRadius = UDim.new(1, 0)
+        indicatorCorner.Parent = indicator
+
+        toggle.MouseButton1Click:Connect(function()
+            Config[configKey] = not Config[configKey]
+            if Config[configKey] then
+                indicator.Position = UDim2.new(0, 30, 0.5, -11)
+                indicator.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
+                toggle.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
+            else
+                indicator.Position = UDim2.new(0, 3, 0.5, -11)
+                indicator.BackgroundColor3 = Color3.fromRGB(150, 150, 170)
+                toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+            end
+            if configKey == "EnableCircle" then CreateFOVCircle() end
+        end)
+
+        return frame
+    end
+
+    local function CreateSlider(parent, text, yPos, min, max, configKey)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 0, 50)
+        frame.Position = UDim2.new(0, 0, 0, yPos)
+        frame.BackgroundTransparency = 1
+        frame.Parent = parent
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 0.4, 0)
+        label.BackgroundTransparency = 1
+        label.Text = text..": "..tostring(Config[configKey])
+        label.TextColor3 = Color3.fromRGB(200, 200, 220)
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextScaled = true
+        label.Font = Enum.Font.Gotham
+        label.Parent = frame
+
+        local slider = Instance.new("Frame")
+        slider.Size = UDim2.new(0.85, 0, 0, 8)
+        slider.Position = UDim2.new(0, 0, 0.7, 0)
+        slider.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+        slider.Parent = frame
+
+        local sliderCorner = Instance.new("UICorner")
+        sliderCorner.CornerRadius = UDim.new(1, 0)
+        sliderCorner.Parent = slider
+
+        local fill = Instance.new("Frame")
+        fill.Size = UDim2.new((Config[configKey] - min) / (max - min), 0, 1, 0)
+        fill.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
+        fill.Parent = slider
+
+        local fillCorner = Instance.new("UICorner")
+        fillCorner.CornerRadius = UDim.new(1, 0)
+        fillCorner.Parent = fill
+
+        slider.MouseButton1Down:Connect(function()
+            local connection
+            connection = RunService.Heartbeat:Connect(function()
+                local touchPos = UserInputService:GetMouseLocation()
+                local pos = touchPos.X - slider.AbsolutePosition.X
+                local percent = math.clamp(pos / slider.AbsoluteSize.X, 0, 1)
+                local value = math.round(min + (max - min) * percent)
+                Config[configKey] = value
+                fill.Size = UDim2.new(percent, 0, 1, 0)
+                label.Text = text..": "..tostring(value)
+                if configKey == "FOV" or configKey == "CircleSize" or configKey == "CircleThickness" then
+                    CreateFOVCircle()
+                end
+            end)
+            local releaseConnection
+            releaseConnection = UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Touch then
+                    connection:Disconnect()
+                    releaseConnection:Disconnect()
+                end
+            end)
+        end)
+
+        return frame
+    end
+
+    local function CreateDropdown(parent, text, yPos, options, configKey)
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 0, 40)
+        frame.Position = UDim2.new(0, 0, 0, yPos)
+        frame.BackgroundTransparency = 1
+        frame.Parent = parent
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0.4, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = Color3.fromRGB(200, 200, 220)
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextScaled = true
+        label.Font = Enum.Font.Gotham
+        label.Parent = frame
+
+        local dropdown = Instance.new("TextButton")
+        dropdown.Size = UDim2.new(0.5, 0, 1, 0)
+        dropdown.Position = UDim2.new(0.5, 0, 0, 0)
+        dropdown.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+        dropdown.Text = Config[configKey]
+        dropdown.TextColor3 = Color3.fromRGB(200, 200, 220)
+        dropdown.TextScaled = true
+        dropdown.Font = Enum.Font.Gotham
+        dropdown.Parent = frame
+
+        local dropdownCorner = Instance.new("UICorner")
+        dropdownCorner.CornerRadius = UDim.new(0, 6)
+        dropdownCorner.Parent = dropdown
+
+        dropdown.MouseButton1Click:Connect(function()
+            local menu = Instance.new("Frame")
+            menu.Size = UDim2.new(0.5, 0, 0, #options * 35)
+            menu.Position = UDim2.new(0.5, 0, 0, 40)
+            menu.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+            menu.Parent = frame
+
+            local menuCorner = Instance.new("UICorner")
+            menuCorner.CornerRadius = UDim.new(0, 6)
+            menuCorner.Parent = menu
+
+            for i, option in ipairs(options) do
+                local btn = Instance.new("TextButton")
+                btn.Size = UDim2.new(1, 0, 0, 35)
+                btn.Position = UDim2.new(0, 0, 0, (i-1) * 35)
+                btn.BackgroundTransparency = 1
+                btn.Text = option
+                btn.TextColor3 = Color3.fromRGB(200, 200, 220)
+                btn.TextScaled = true
+                btn.Font = Enum.Font.Gotham
+                btn.Parent = menu
+
+                btn.MouseButton1Click:Connect(function()
+                    Config[configKey] = option
+                    dropdown.Text = option
+                    menu:Destroy()
+                end)
+            end
+        end)
+
+        return frame
+    end
+
+    local aimbotContent = Instance.new("ScrollingFrame")
+    aimbotContent.Name = "AimbotContent"
+    aimbotContent.Size = UDim2.new(1, 0, 1, 0)
+    aimbotContent.BackgroundTransparency = 1
+    aimbotContent.CanvasSize = UDim2.new(0, 0, 0, 350)
+    aimbotContent.ScrollBarThickness = 4
+    aimbotContent.Parent = contentContainer
+    tabContents["Aimbot"] = aimbotContent
+
+    CreateToggle(aimbotContent, "Ativar Aimbot", 5, "AimbotEnabled")
+    CreateToggle(aimbotContent, "Wall Check", 50, "WallCheck")
+    CreateDropdown(aimbotContent, "Alvo", 95, {"Head", "HumanoidRootPart"}, "AimPart")
+    CreateSlider(aimbotContent, "

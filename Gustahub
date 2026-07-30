@@ -1,0 +1,150 @@
+    CreateSlider(aimbotContent, "FOV", 145, 30, 500, "FOV")
+    CreateSlider(aimbotContent, "Suavidade", 200, 1, 10, "AimSmoothness")
+    CreateToggle(aimbotContent, "FOV Circle", 255, "EnableCircle")
+    CreateSlider(aimbotContent, "Tamanho do Círculo", 310, 50, 300, "CircleSize")
+
+    local espContent = Instance.new("ScrollingFrame")
+    espContent.Name = "ESPContent"
+    espContent.Size = UDim2.new(1, 0, 1, 0)
+    espContent.BackgroundTransparency = 1
+    espContent.CanvasSize = UDim2.new(0, 0, 0, 350)
+    espContent.ScrollBarThickness = 4
+    espContent.Visible = false
+    espContent.Parent = contentContainer
+    tabContents["ESP"] = espContent
+
+    CreateToggle(espContent, "Ativar ESP", 5, "ESPEnabled")
+    CreateToggle(espContent, "Team Check", 50, "TeamCheck")
+    CreateToggle(espContent, "ESP Nome", 95, "ShowName")
+    CreateToggle(espContent, "ESP Vida", 140, "ShowHealth")
+    CreateToggle(espContent, "ESP Linhas", 185, "ShowTracers")
+    CreateToggle(espContent, "ESP Caixa", 230, "ShowBox")
+    CreateToggle(espContent, "ESP Distância", 275, "ShowDistance")
+
+    local perfContent = Instance.new("ScrollingFrame")
+    perfContent.Name = "PerfContent"
+    perfContent.Size = UDim2.new(1, 0, 1, 0)
+    perfContent.BackgroundTransparency = 1
+    perfContent.CanvasSize = UDim2.new(0, 0, 0, 120)
+    perfContent.ScrollBarThickness = 4
+    perfContent.Visible = false
+    perfContent.Parent = contentContainer
+    tabContents["Performance"] = perfContent
+
+    CreateToggle(perfContent, "Boost FPS", 5, "BoostFPS")
+    CreateToggle(perfContent, "Mostrar FPS", 50, "ShowFPS")
+
+    local panelOpen = false
+    
+    local function TogglePanel()
+        panelOpen = not panelOpen
+        mainPanel.Visible = panelOpen
+
+        if panelOpen then
+            blur.Size = 12
+            local tween = TweenService:Create(mainPanel, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0.1})
+            tween:Play()
+
+            for name, button in pairs(tabButtons) do
+                if name == currentTab then
+                    button.TextColor3 = Color3.fromRGB(0, 180, 255)
+                end
+            end
+            for name, content in pairs(tabContents) do
+                content.Visible = (name == currentTab)
+            end
+        else
+            blur.Size = 0
+            local tween = TweenService:Create(mainPanel, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {BackgroundTransparency = 1})
+            tween:Play()
+            task.wait(0.2)
+            mainPanel.Visible = false
+        end
+    end
+
+    floatingButton.MouseButton1Click:Connect(TogglePanel)
+
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.X then
+            TogglePanel()
+        end
+    end)
+
+    local fpsLabel = Instance.new("TextLabel")
+    fpsLabel.Name = "FPSLabel"
+    fpsLabel.Size = UDim2.new(0, 70, 0, 35)
+    fpsLabel.Position = UDim2.new(0, 10, 0, 10)
+    fpsLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    fpsLabel.BackgroundTransparency = 0.5
+    fpsLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+    fpsLabel.TextScaled = true
+    fpsLabel.Font = Enum.Font.GothamBold
+    fpsLabel.Visible = false
+    fpsLabel.Parent = screenGui
+
+    local fpsCorner = Instance.new("UICorner")
+    fpsCorner.CornerRadius = UDim.new(0, 6)
+    fpsCorner.Parent = fpsLabel
+
+    local frameCount = 0
+    local lastTime = tick()
+
+    RunService.Heartbeat:Connect(function()
+        frameCount = frameCount + 1
+        local currentTime = tick()
+        if currentTime - lastTime >= 0.5 then
+            local fps = math.round(frameCount / (currentTime - lastTime))
+            fpsLabel.Text = "FPS: "..tostring(fps)
+            frameCount = 0
+            lastTime = currentTime
+        end
+        fpsLabel.Visible = Config.ShowFPS
+
+        if Config.BoostFPS then
+            settings().Rendering.QualityLevel = 1
+        else
+            settings().Rendering.QualityLevel = 3
+        end
+
+        if fovCircle then
+            fovCircle.Visible = Config.AimbotEnabled and Config.EnableCircle
+            fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            fovCircle.Radius = Config.CircleSize
+            fovCircle.Thickness = Config.CircleThickness
+            fovCircle.Transparency = Config.CircleTransparency
+        end
+
+        if Config.ESPEnabled then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    if not espObjects[player] then CreateESP(player) end
+                    UpdateESP(player)
+                end
+            end
+        else
+            for _, esp in pairs(espObjects) do
+                esp.Box.Visible = false
+                esp.HealthBar.Visible = false
+                esp.HealthBg.Visible = false
+                esp.Name.Visible = false
+                esp.Distance.Visible = false
+                esp.Tracer.Visible = false
+            end
+        end
+
+        if Config.AimbotEnabled then
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftButton) then
+                local target = GetClosestTarget()
+                if target then
+                    AimAt(target)
+                end
+            end
+        end
+    end)
+
+    return screenGui
+end
+
+CreateFOVCircle()
+CreateModernUI()
